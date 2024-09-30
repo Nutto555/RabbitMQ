@@ -1,33 +1,42 @@
-#!/usr/bin/env node
+const amqp = require("amqplib/callback_api");
 
-var amqp = require('amqplib/callback_api');
+// Kitchens can process different food types
+const foodTypes = process.argv.slice(2);  // e.g., ['pizza', 'pasta']
 
-amqp.connect('amqp://localhost', function(error0, connection) {
+amqp.connect("amqp://localhost", function (error0, connection) {
   if (error0) {
     throw error0;
   }
-  connection.createChannel(function(error1, channel) {
+  connection.createChannel(function (error1, channel) {
     if (error1) {
       throw error1;
     }
-    var queue = 'order_queue';
 
-    channel.assertQueue(queue, {
-      durable: true
-    });
-    channel.prefetch(1);
-    console.log(" [*] Waiting for messages in %s. To exit press CTRL+C", queue);
-    channel.consume(queue, function(msg) {
-        var secs = msg.content.toString().split('.').length - 1;
-        console.log(" [x] Received");
-        console.log(JSON.parse(msg.content));
+    const exchange = "food_orders";
 
-        setTimeout(function() {
-        console.log(" [x] Done");
-        channel.ack(msg);
-        }, secs * 1000);
-    }, {
-    noAck: false
+    channel.assertExchange(exchange, "topic", { durable: true });
+
+    channel.assertQueue("", { exclusive: true }, function (error2, q) {
+      if (error2) {
+        throw error2;
+      }
+
+      console.log(" [*] Waiting for orders of %s.", foodTypes.join(", "));
+
+      // Bind each kitchen queue to the corresponding food types
+      foodTypes.forEach((foodType) => {
+        channel.bindQueue(q.queue, exchange, foodType);
+      });
+
+      channel.consume(q.queue, function (msg) {
+        const order = JSON.parse(msg.content.toString());
+        console.log(" [x] Kitchen received order: ", order);
+
+        setTimeout(function () {
+          console.log(" [x] Kitchen finished cooking %s", order.name);
+          channel.ack(msg);
+        }, order.quantity * 1000);  // Simulate cooking time based on quantity
+      }, { noAck: false });
     });
   });
-});  
+});
